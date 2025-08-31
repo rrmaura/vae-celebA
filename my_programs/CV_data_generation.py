@@ -30,30 +30,53 @@ def job(features, ATE_truth, male_on_job):
     prob[features['Master'] == 1] += ATE_truth
     return np.random.binomial(1, prob)
 
+def master_degree_complicated(features, p = -0.25):
+    prob = np.ones(len(features))*0.8
+    prob[features['Male'] == 1] += p
+    prob[features['Young'] == 1] += p
+    # prob[features['Young'] == 1] += p    
+    return np.random.binomial(1, prob)
 
-def randomize_data(seed):
+
+def job_complicated(features, ATE_truth, p = +0.25):
+    prob = np.ones(len(features))*0.3
+    prob[features['Male'] == 1] += p
+    prob[features['Young'] == 1] += p
+    # prob[features['Young'] == 1] -= p    
+    prob[features['Master'] == 1] += ATE_truth
+    return np.random.binomial(1, prob)
+
+def randomize_data(seed, random_param = True, complicated = False):
     np.random.seed(seed)
 
     folder = 'C:\\Users\\Roberto\\Desktop\\celebA\\Anno-20230603T133225Z-001\\Anno\\'
-
-    ATE_truth = np.random.uniform(0.1, 0.2)
-    male_on_job = np.random.uniform(-0.15, 0.15)
-    male_on_master = np.random.uniform(-0.15, 0.15)
+    if random_param == True:
+        ATE_truth = np.random.uniform(0.1, 0.2)
+        male_on_job = np.random.uniform(-0.15, 0.15)
+        male_on_master = np.random.uniform(-0.15, 0.15)
+    else:
+        ATE_truth = 0.05
+        male_on_job = 0.1
+        male_on_master = 0.1
 
     # read the data from the list_attr_celeba.txt file and the other files
     features = pd.read_csv(folder + 'list_attr_celeba.txt', sep='\s+', skiprows=1)
     # binary 0,1 instead of binary -1 ,+1
     features = features.replace(-1, 0)
 
-    features['Master'] = master_degree(features, male_on_master)
-    features['Job'] = job(features, ATE_truth, male_on_job)
-    features.to_csv('my_programs/features_MSC_JOB.csv', index=True) # to do regressions
+    if complicated == True:
+        features['Master'] = master_degree_complicated(features)
+        features['Job'] = job_complicated(features, ATE_truth)
+    else:
+        features['Master'] = master_degree(features, male_on_master)
+        features['Job'] = job(features, ATE_truth, male_on_job)
+    features.to_csv('my_csv/features_MSC_JOB.csv', index=True) # to do regressions
     # on features, the index has the number of the image of celebA
     features['number'] = features.index
 
     # data.csv contains the features for the images of the celebA dataset
     # the index of the images is in the first column. This is a subset of celebA
-    image_features = pd.read_csv('my_programs/data.csv', skiprows=1)
+    image_features = pd.read_csv('my_csv/data.csv', skiprows=1)
     # call the first column 'number', and the other columns will be the features
     image_features.columns = ['number'] + list(range(image_features.shape[1]-1))
 
@@ -63,25 +86,47 @@ def randomize_data(seed):
     features_final = pd.merge(features[["Job", "Master", "number"]], image_features, on='number')
 
     # save the features in a csv file
-    features_final.to_csv('my_programs/features_final.csv', index=False)
+    features_final.to_csv('my_csv/features_final.csv', index=False)
 
     return ATE_truth, male_on_job, male_on_master
 
 def simple_regression():
-    data = pd.read_csv('my_programs/features_MSC_JOB.csv')
+    data = pd.read_csv('my_csv/features_MSC_JOB.csv')
     Y = data['Job']
     T = data['Master']
-    C = data['Smiling']
+    Male = data['Male']
+    Young = data['Young']
 
-    # TODO: confirm that you merged properly. Check images 
     
-    # regress Y on T and C
-    X = data[['Master', 'Smiling']]
+    # regress Y on T
+    X = data['Master']
     X = sm.add_constant(X)
     model = sm.OLS(Y, X).fit()
     # print the coefficients
     print(model.params)
+    # print the SE
+    print(model.bse)
+
+    print('-------------------')
+    # regress Y on T and Male 
+    X = data[['Master', 'Male']]
+    X = sm.add_constant(X)
+    model = sm.OLS(Y, X).fit()
+    # print the coefficients
+    print(model.params)
+    # print the SE
+    print(model.bse)
+    print('-------------------')
+
+    # regress Y on T and Male  and Young
+    X = data[['Master','Male', 'Young']]
+    X = sm.add_constant(X)
+    model = sm.OLS(Y, X).fit()
+    # print the coefficients
+    print(model.params)
+    # print the SE
+    print(model.bse)
 
 
-randomize_data(9317)
+randomize_data(42, random_param = False, complicated = True)
 simple_regression()

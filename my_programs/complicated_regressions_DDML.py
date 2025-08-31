@@ -19,18 +19,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import KFold
 from CV_data_generation import randomize_data
-from datetime import date
-
-# get todays date
-today = date.today()
-d1 = today.strftime("%d_%m_%Y")
-
 n_folds = 5
 patience = 4
 hidden_size = 16
 random_param = False # if true, the parameters from the DGP are random. O.w. they are fixed at 0.1
-num_simulations = 1
-frac_data = 1
+save_output = False
 # # seeds
 # seed = 241543903 
 # np.random.seed(seed)
@@ -53,22 +46,22 @@ class Net(tf.keras.Model):
 
 
 # if the file to save results does not exist, create it and add the header
-# name csv = today's date + PLR_results.csv
-name_csv = 'my_csv/' + d1 + '_PLR_results.csv'
-if not os.path.isfile(name_csv):
-    with open(name_csv, 'w') as f:
+if not os.path.isfile('my_csv/results_complicated.csv'):
+    with open('my_csv/results_complicated.csv', 'w') as f:
         writer = csv.writer(f)
         writer.writerow(['seed', 'ATE', 'SE', 'CI_lower', 'CI_upper', 'ATE2', 'SE2', 'CI2_lower', 'CI2_upper', 'ATE_truth', 'ATE_in_CI', 'ATE2_in_CI'])
 
+num_simulations = 1
 
+# ATE_truth, male_on_job, male_on_master = randomize_data(seed=42, random_param=random_param)
+ATE_truth, male_on_job, male_on_master = randomize_data(42, random_param = False, complicated = True)
+# Open data (features_final.csv)
+data_original = pd.read_csv('my_csv/features_final.csv')
 for _ in range(num_simulations): 
-    seed = np.random.randint(100000)
+    seed = np.random.randint(200000)
     np.random.seed(seed)
     tf.random.set_seed(seed)
     
-    # ATE_truth, male_on_job, male_on_master = randomize_data(seed, random_param=random_param)
-    ATE_truth, male_on_job, male_on_master = randomize_data(42, random_param = False, complicated = True)
-
     print("ATE_truth: ", ATE_truth)
     
     # split the data into k folds
@@ -78,11 +71,9 @@ for _ in range(num_simulations):
     # ate_estimates = np.zeros(k)
     # ate_estimates_simple = np.zeros(k)
 
-    # Open data (features_final.csv)
-    data = pd.read_csv('my_csv/features_final.csv')
-    # take a random 10% of the data with resampling
-    data = data.sample(frac=frac_data, replace=True, random_state=seed)
-
+    # take a random 1% of the data with resampling
+    # data = data_original.sample(frac=0.1, replace=True, random_state=seed)
+    data = data_original
 
     # data = data.sample(frac=0.1, random_state=seed)
 
@@ -196,6 +187,7 @@ for _ in range(num_simulations):
     ATE_truth_in_CI2 = (ATE_truth >= CI2[0]) and (ATE_truth <= CI2[1])
     ATE_truth_in_CI2 = int(ATE_truth_in_CI2)
     # save the ATE, SE, and CI to a csv file
-    with open(name_csv, 'a') as f:
-        writer = csv.writer(f)
-        writer.writerow([seed, ATE, SE, CI[0], CI[1], ATE2, SE2, CI2[0], CI2[1], ATE_truth, ATE_truth_in_CI, ATE_truth_in_CI2])
+    if save_output:
+        with open('my_csv/results_complicated.csv', 'a') as f:
+            writer = csv.writer(f)
+            writer.writerow([seed, ATE, SE, CI[0], CI[1], ATE2, SE2, CI2[0], CI2[1], ATE_truth, ATE_truth_in_CI, ATE_truth_in_CI2])

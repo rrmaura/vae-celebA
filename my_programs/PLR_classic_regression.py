@@ -10,12 +10,17 @@
 
 # we will approximate f and g with a neural network with 2 hidden layers
 
-# TODO: get a nice normal distribution. I think that the problem might be that 
-# in every simulation you are using the same dataset... get subsamples!
+# TODO: try with the real dataset from CELEB 
+# TODO: okay, take a step even prior to this... try just regressions with the key variables? 
 # ---------------------------------------------------------------
+# TODO: should the regression include constant term? 
+# TODO: dropout? 
+# TODO: maybe is the t-test instead of 1.96*SE? 
+# TODO: maybe the true beta is slightly different from empirical beta? 
+# TODO: different Networks for propensity and outcome? 
+# TODO: check that the higher order neyman orthogonal estimator is properly implemented
+# TODO: try high order neyman orthogonal estimator with known MU_r and MU_r-1
 # TODO: Same results with way less data. 
-# TODO: same results with different features being relevant
-# TODO: counterfactuals. What if my physical appearance was different?
 
 import numpy as np
 import pandas as pd
@@ -30,10 +35,8 @@ from sklearn.metrics import mean_squared_error
 from scipy.stats import t
 
 
-patience = 4
+patience = 3
 hidden_size = 16
-# define the number of folds
-n_folds = 5
 # # seeds
 # seed = 241543903 
 # np.random.seed(seed)
@@ -69,14 +72,21 @@ for _ in range(num_simulations):
     np.random.seed(seed)
     tf.random.set_seed(seed)
     
-    ATE_truth, male_on_job, male_on_master = randomize_data(seed)
+    # ATE_truth, male_on_job, male_on_master = randomize_data(seed)
+    ATE_truth, male_on_job, male_on_master = randomize_data(42, random_param = False, complicated = True)
+
     print("ATE_truth: ", ATE_truth)
+    # define the number of folds
+    k = 2
 
     # split the data into k folds
-    kf = KFold(n_splits=n_folds, shuffle=True)
+    kf = KFold(n_splits=k, shuffle=True)
 
     # Open data (features_final.csv)
-    data = pd.read_csv('my_csv/features_final.csv')
+    # data = pd.read_csv('my_csv/features_final.csv')
+    # sample only a subset of 18600 observations, without index
+    data = pd.read_csv('my_csv/features_MSC_JOB.csv', index_col=0).sample(n=18600, random_state=seed)
+    
     
     # you need to keep track of the double robust estimator for each fold to
     # later calculate the SE of the ATE estimate
@@ -89,11 +99,17 @@ for _ in range(num_simulations):
         # Split the data into Y ('Job'), D ('Master'), and X (the rest)
         Y1 = data1['Job']
         D1 = data1['Master']
-        X1 = data1.drop(['Job', 'Master', "number"], axis=1)
+        # X1 = data1.drop(['Job', 'Master', "number"], axis=1)
+        # X1 = data1.drop(['Job', 'Master'], axis=1)
+        X1 = data1['Smiling']
+
 
         Y2 = data2['Job']
         D2 = data2['Master']
-        X2 = data2.drop(['Job', 'Master', "number"], axis=1)
+        # X2 = data2.drop(['Job', 'Master', "number"], axis=1)
+        # X2 = data2.drop(['Job', 'Master'], axis=1)
+        X2 = data2['Smiling']
+
 
         # Convert to numpy arrays
         Y1 = np.array(Y1)
@@ -104,36 +120,23 @@ for _ in range(num_simulations):
         D2 = np.array(D2)
         X2 = np.array(X2)
 
-        # Define the loss function and the optimizer
-        loss_fn = tf.keras.losses.MeanSquaredError()
-        optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
-
-        # Propensity score NN
-        prop_score_NN = Net(input_size=X1.shape[1])
-
-        # compile the model
-        prop_score_NN.compile(optimizer=optimizer, loss=loss_fn)
-
-        # Train the propensity score NN using fit(), using the loss function and optimizer defined above
-        # and doing early stop with patience=10
-        prop_score_NN.fit(X1, D1, epochs=100, validation_split=0.2, callbacks=[tf.keras.callbacks.EarlyStopping(patience=patience)])
-
-        # now the same but with outcome NN
-        loss_fn = tf.keras.losses.MeanSquaredError()
-        optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
-        outcome_NN = Net(input_size=X1.shape[1])
-        outcome_NN.compile(optimizer=optimizer, loss=loss_fn)
-        outcome_NN.fit(X1, Y1, epochs=100, validation_split=0.2, callbacks=[tf.keras.callbacks.EarlyStopping(patience=patience)])
-
+        # # Train the propensity score NN using fit(), using the loss function and optimizer defined above
+        # # and doing early stop with patience=10
+        # prop_score_NN.fit(X1, D1, epochs=100, validation_split=0.2, callbacks=[tf.keras.callbacks.EarlyStopping(patience=patience)])
+        # Instead of using fit(), we will regress D on X using sklearn
+        reg_propensity_score = LinearRegression().fit(X1.reshape(-1,1), D1)
+        # and then use the predict() method to get the propensity score
+        
+        reg_outcome = LinearRegression().fit(X1.reshape(-1,1), Y1)
         #  now we have the propensity score NN and the outcome NN
         # we can estimate the average treatment effect
         # we will use the test data (X2, D2, Y2)
 
         # first, partial out (Y from X) and (D from X)
-        Y_hat = outcome_NN(X2)
-        D_hat = prop_score_NN(X2)
-        Y_noise[test_index] = Y2 - Y_hat.numpy().flatten()
-        D_noise[test_index] = D2 - D_hat.numpy().flatten()
+        Y_hat = reg_outcome.predict(X2.reshape(-1,1))
+        D_hat = reg_propensity_score.predict(X2.reshape(-1,1))
+        Y_noise[test_index] = Y2 - Y_hat
+        D_noise[test_index] = D2 - D_hat
 
 
     # calculate the mean ATE estimate across all folds, 
@@ -141,14 +144,22 @@ for _ in range(num_simulations):
     # Also, obtain the SE of the ATE estimate and CI directly from OLS
 
     # fit a linear regression model to estimate the ATE
-    reg = sm.OLS(Y_noise, D_noise.reshape(-1, 1)).fit()
-    ATE = reg.params[0]
+    reg = LinearRegression(fit_intercept=True).fit(D_noise.reshape(-1, 1), Y_noise)
+    # calculate the mean ATE estimate across all folds
+    intercept = reg.intercept_
+    ATE = reg.coef_[0]
     # calculate the standard error of the ATE estimate
-    SE = reg.bse[0]
+    Y_noise_pred = reg.predict(D_noise.reshape(-1, 1))
+    SE = np.sqrt(mean_squared_error(Y_noise, Y_noise_pred) / len(Y_noise))
     # calculate the confidence interval of the ATE estimate
-    CI = reg.conf_int(alpha=0.05, cols=None)[0]
+    # for 95% CI
+    alpha = 0.05
+    # calculate the critical value using t test
+    t_critical = t.ppf(1 - alpha / 2, df=len(Y_noise) - 1)
+    # calculate the confidence interval
+    CI = [ATE - t_critical * SE, ATE + t_critical * SE]
 
-
+   
     # # higher order neyman orthogonal 
     # #second_p_est = np.mean(res_p_first**2)
     # mu_2 = np.mean(D_noise ** 2)
@@ -159,7 +170,6 @@ for _ in range(num_simulations):
     # #     robust_ortho_est_ml = np.mean(res_q * mult_p_est)/np.mean(res_p * mult_p_est)
     # ATE = np.mean(Y_noise * multiplier) / np.mean(D_noise * multiplier)
     # SE = np.sqrt(np.mean((Y_noise - ATE * D_noise) ** 2) / len(Y_noise))
-    # CI = (ATE - 1.96 * SE, ATE + 1.96 * SE)
 
 
     # # now the same without intercept
@@ -178,9 +188,7 @@ for _ in range(num_simulations):
     
 
     ATE_truth_in_CI = (ATE_truth >= CI[0]) and (ATE_truth <= CI[1])
-    ATE_truth_in_CI = int(ATE_truth_in_CI) # 1 if true, 0 if false
     # save the ATE, SE, and CI to a csv file
     with open('my_csv/PLR_results.csv', 'a') as f:
         writer = csv.writer(f)
         writer.writerow([seed, 0, ATE, SE, CI[0], CI[1], ATE_truth, ATE_truth_in_CI, male_on_job, male_on_master])
-
